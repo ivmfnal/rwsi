@@ -1,0 +1,119 @@
+#!/bin/sh
+
+init () {
+	echo $1 > .product
+	echo initialized with product $1
+}
+
+server () {
+	echo $1 > .server
+	echo server is set to $1
+}
+
+declare () {
+
+    version=$1
+    tag=$2
+
+    rm -f ./${tag} 
+    ln -s ${version} ./${tag}
+    echo version $version declared as $tag
+}
+
+install () {
+    if [ "$#" -lt 1 ]; then
+        echo 'prod install <version> [<tag>]'
+        echo 'prod install -f <version or tag> [<install as tag>]'
+        exit 1
+    fi
+
+    if [ ! -r ".product" ]; then
+	echo Error: product must be initialzed
+	echo Use:
+	echo "      " prod init '<product name>'
+	exit 1
+    fi
+    
+    product=`cat .product`
+    do_fetch="no"
+
+    if [ "$1" == "-f" ]; then
+        do_fetch="yes"
+        version=$2
+        tag=$3
+    else
+        version=$1
+        tag=$2
+
+    fi
+
+    tarfile=/tmp/${product}_${version}.tar
+
+    if [ "$do_fetch" == "yes" ]; then
+        if [ ! -f .server ]; then
+		echo "Use prod server <server host:port> to define product server location"
+		exit 1
+	fi
+        server=`cat .server`
+        actual_version=`curl http://${server}/version/${product}/${version} 2> /dev/null`
+        if [ "$?" != "0" ]; then
+            echo Error communicating with the product server
+            exit 1
+        fi
+        if [ "$actual_version" == "" ]; then
+            echo Version $version not found on the server
+	        exit 1
+        fi
+        version=$actual_version
+        curl -o $tarfile http://${server}/fetch/${product}/${version} 2> /dev/null
+        if [ "$?" != "0" ]; then
+            echo Error downloading the product from the server
+            exit 1
+        fi
+    fi
+
+    if [ ! -f $tarfile ]; then
+        echo Tarfile $tarfile not found
+        exit 1
+    fi
+
+    rm -rf ./${version}
+    mkdir ./${version}
+    cp ${tarfile} .
+    (cd ./${version}; tar xf ${tarfile})
+
+    echo $product $version installed
+
+    if [ "$tag" != "" ]; then
+	declare $version $tag
+    fi
+}
+
+command=$1
+shift
+
+case $command in
+    init)
+	init $1
+	;;
+    server)
+	server $1
+	;;
+    declare)
+        declare $1 $2
+        ;;
+    install)
+        install $1 $2 $3
+        ;;
+    *)
+        echo "Usage:"
+        echo "prod init <product name>"
+        echo "prod server <server host:port>"
+        echo "prod isntall <version> [<tag>]"
+        echo "prod isntall -f <server version or tag> [<local tag>]"
+        echo "prod declare <version> <tag>"
+        ;;
+
+esac
+
+
